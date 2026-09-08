@@ -22,7 +22,7 @@
 | AI4Science 可视化 | 科研文献、实体、关系、实验指标、Embedding 联动分析 | 阶段 3、5、6 |
 | 多模态展示 | PDF 原文、文本证据、图片/表格元数据与实体联动 | 阶段 6 |
 | 实验数据可视化 | ECharts 趋势、分布、热力图、平行坐标、桑基图 | 阶段 3 |
-| Agent 编排 | 查询规划、检索、证据整理、图表生成的可视化轨迹 | 阶段 2、7 |
+| Agent 编排 | LangGraph 状态图、查询规划、检索、证据整理、图表生成的可视化轨迹 | 阶段 2、7 |
 | 大规模复杂 Web 应用 | 工作台路由、领域状态、数据适配层、错误边界 | 阶段 1 |
 | ECharts、D3.js、WebGL | ECharts 分析看板、d3-force-3d 3D 模式、WebGL 大图模式 | 阶段 3、4 |
 | 大规模数据渲染 | 10 万节点/30 万边目标、GPU 渲染、LOD、聚合、Worker | 阶段 4 |
@@ -104,13 +104,17 @@
               ▼
 Next.js Route Handlers / Application Services
 ├─ Project & Corpus Service
-├─ Query Orchestrator
+├─ LangGraph Gateway（SSE 转发、取消、鉴权、协议转换）
 ├─ Graph/Analytics API
 ├─ Citation & Source API
 └─ Telemetry API
               │
               ▼
-GraphRAG 3.1 / Model Providers / Parquet / LanceDB / Local Files
+Python AI Runtime
+├─ LangGraph（状态、分支、重试、工具编排、Checkpoint）
+├─ GraphRAG 3.1（索引、社区分析、图检索）
+├─ Model Providers（OpenAI / Ollama）
+└─ Parquet / LanceDB / Local Files
 ```
 
 架构原则：
@@ -118,23 +122,36 @@ GraphRAG 3.1 / Model Providers / Parquet / LanceDB / Local Files
 - UI 组件不直接理解 GraphRAG 文件目录，统一通过 application service 和 DTO 获取数据。
 - 3D 图、大图和 Embedding 图共享 selection/filter store，但各自维护相机和渲染状态。
 - 服务端事件采用带版本的判别联合类型，禁止在 UI 内通过字符串猜测事件形态。
+- LangGraph 只负责编排，不替代 GraphRAG；GraphRAG 作为检索节点或工具被状态图调用。
+- Next.js 不承载 LangGraph 运行状态，只负责 Web 边界和事件转发；Python runtime 是工作流执行源。
 - 图表、图谱只消费规范化的数据集，转换和采样放在 Worker 或服务端完成。
 - 对关键技术决策建立 `docs/adr/`，记录背景、选择和取舍。
 
+### 5.1 LangGraph、LangChain 与 GraphRAG 的职责边界
+
+| 组件 | 本项目职责 | 是否替代现有能力 |
+| --- | --- | --- |
+| Microsoft GraphRAG | 文档索引、实体关系抽取、社区分析、local/global/drift 等图检索 | 保留，是知识检索核心 |
+| LangGraph | 工作流状态、条件分支、重试、取消、checkpoint、工具编排 | 新增，替换当前手写顺序编排 |
+| LangChain Core | 仅在需要标准消息/工具协议时使用 | 可选，不引入完整 LangChain 应用层 |
+| Next.js API | 浏览器边界、鉴权、参数校验、SSE 转发 | 保留，但减少 AI 编排职责 |
+
+引入原则：先使用 LangGraph 解决可观察的编排问题，再扩展工具型 Agent。不能保留一套手写流程并额外包装一层“空状态图”；迁移完成后，问答执行的唯一事实来源应是 LangGraph run。
+
 ## 6. 阶段执行总览
 
-按单人、每周约 20～30 小时估算，总周期约 12～14 周。时间是规划值，阶段是否完成以验收标准为准。
+按单人、每周约 20～30 小时估算，总周期约 13～16 周。时间是规划值，阶段是否完成以验收标准为准。
 
 | 阶段 | 建议周期 | 阶段成果 | 对岗位的核心证明 |
 | --- | --- | --- | --- |
 | 0. 工程基线与性能测量 | 1 周 | 可重复运行、测试和基线报告 | 工程化、问题排查 |
 | 1. 前端架构重构 | 1～2 周 | 多工作区、共享状态、数据契约 | 大型复杂 Web 架构 |
-| 2. AI 对话与证据链 | 2 周 | 结构化流、引用、Trace、联动 | 大模型交互、Agent 页面 |
+| 2. LangGraph 对话与证据链 | 2～3 周 | 状态图、结构化流、引用、Trace、联动 | 大模型交互、LangGraph 基础编排 |
 | 3. ECharts 分析中心 | 2 周 | 复杂图表及多图联动 | ECharts、实验可视化 |
 | 4. WebGL 大规模图谱 | 2～3 周 | 10 万节点级大图模式 | WebGL、大规模渲染、性能优化 |
 | 5. Embedding 可视化 | 1～2 周 | 聚类、近邻、套索和联动 | AI 可视分析、前沿预研 |
 | 6. AI4Science 多模态闭环 | 1～2 周 | 原文证据和领域化演示 | AI4Science、多模态 |
-| 7. Agent 分析与图表生成 | 1 周 | 工具编排和安全图表 DSL | Agent 编排、创新交互 |
+| 7. LangGraph Agent 分析与图表生成 | 1～2 周 | 条件路由、工具编排、Checkpoint 和安全图表 DSL | Agent 编排、创新交互 |
 | 8. 质量、优化与作品化 | 1～2 周 | CI、性能报告、演示和文档 | 性能调优、交付能力 |
 
 ## 7. 分阶段详细计划
@@ -229,11 +246,11 @@ workers/
 - 切换工作区不丢失当前实体选择和筛选条件。
 - 阶段 0 的冒烟测试全部通过。
 
-## 阶段 2：AI 对话、引用证据链与 Agent Trace
+## 阶段 2：LangGraph 对话、引用证据链与 Agent Trace
 
 ### 目标
 
-把现有“流式文本 + 模糊实体高亮”升级为可解释、可追溯的大模型交互系统。
+引入 LangGraph 作为 Python 工作流编排层，把现有“流式文本 + 模糊实体高亮”升级为可解释、可追溯、可取消和可恢复的大模型交互系统。本阶段只实现确定性的单次问答图，不提前引入开放式工具循环。
 
 ### 任务
 
@@ -244,9 +261,26 @@ workers/
   - `citations.completed`；
   - `graph.selection`；
   - `run.completed/failed`。
-- 将现有 CLI stdout 解析隔离为 adapter，避免 route handler 直接承担全部编排。
+- 在 `pyproject.toml` 中固定兼容版本的 `langgraph`，必要时引入最小范围的 LangChain Core 消息类型；不默认引入完整 LangChain 套件。
+- 新建独立 Python AI runtime，通过明确的 HTTP/SSE 或 NDJSON 进程协议与 Next.js 通信；禁止让浏览器直接访问 LangGraph。
+- 定义带类型的 `ResearchQueryState`，至少包含：
+  - `run_id`、`thread_id`、`question`、`query_method`；
+  - `plan`、`retrieved_context`、`citations`、`entity_ids`；
+  - `answer`、`errors`、`timings`、`cancelled`。
+- 第一版 LangGraph 使用确定性节点和条件边：
+  - `validate_input`：校验问题、项目和查询模式；
+  - `plan_query`：确定 GraphRAG 查询方法和限制；
+  - `run_graphrag`：调用现有 GraphRAG CLI adapter；
+  - `extract_evidence`：生成结构化 citation 和实体映射；
+  - `compose_answer`：整理流式答案；
+  - `finalize`：汇总 trace、耗时和运行状态；
+  - `handle_error`：统一失败和可恢复信息。
+- 将现有 CLI stdout 解析隔离为 GraphRAG adapter，避免 Next.js route handler 直接承担全部编排。
+- 让 LangGraph node 生命周期映射为统一事件协议，Next.js 仅转发/转换事件，前端不依赖 Python 内部节点实现。
 - 增加 `AbortController`，支持用户停止生成和组件卸载自动取消。
+- 将取消信号从浏览器贯通到 Next.js、LangGraph runtime 和 GraphRAG 子进程。
 - 增加会话模型：conversation、message、query method、provider、耗时、错误状态。
+- 为 `thread_id` 预留 checkpoint 边界；本阶段可使用内存或 SQLite checkpoint，但必须通过接口隔离，避免业务代码绑定存储实现。
 - 把 citation 设计成结构化数据：文档 ID、页码/段落、文本片段、实体 ID、相关性分数。
 - 答案中的引用点击后：
   - 打开来源面板；
@@ -263,7 +297,41 @@ workers/
 - 任一引用都能解析到结构化 source；无法定位时明确标记，而不是伪造页码。
 - 点击引用能够联动来源视图和图谱。
 - SSE 断开、重复事件和不完整事件有自动化测试。
+- LangGraph 状态迁移、条件分支、节点失败和重试具有 Python 单元测试。
+- 相同输入与固定 mock 检索结果能得到确定的节点执行顺序和结构化输出。
+- 取消请求后，GraphRAG 子进程和 LangGraph run 均停止，不残留后台任务。
 - 不再以纯字符串匹配作为唯一的实体证据来源；字符串匹配只能作为降级策略。
+
+### 阶段 2 推荐状态图
+
+```text
+START
+  ↓
+validate_input ──invalid──→ handle_error
+  ↓ valid
+plan_query
+  ↓
+run_graphrag ──failed──→ handle_error
+  ↓ success
+extract_evidence
+  ↓
+compose_answer
+  ↓
+finalize
+  ↓
+END
+```
+
+### 阶段 2 主要影响目录
+
+- `pyproject.toml`、`uv.lock`
+- `ai_runtime/graph/`：state、nodes、edges、graph factory
+- `ai_runtime/adapters/`：GraphRAG CLI 和模型供应商适配
+- `ai_runtime/api/`：运行、事件流和取消接口
+- `lib/contracts/agent-events.ts`
+- `app/api/chat/stream/route.ts`
+- `components/ChatPanel.tsx`
+- `tests/agent/`
 
 ## 阶段 3：ECharts 实验与知识分析中心
 
@@ -390,16 +458,27 @@ workers/
 - 演示数据具有许可/来源说明，敏感数据不进入仓库。
 - 至少一种 PDF 引用能准确定位到页或段落。
 
-## 阶段 7：Agent 分析编排与安全图表生成
+## 阶段 7：LangGraph Agent 分析编排与安全图表生成
 
 ### 目标
 
-让 AI 不仅回答问题，还能选择分析工具、生成可验证图表并展示执行过程。
+在阶段 2 的确定性 LangGraph 问答图之上，扩展条件路由、工具调用、验证和 checkpoint，让 AI 不仅回答问题，还能选择分析工具、生成可验证图表并展示执行过程。
 
 ### 任务
 
 - 定义有限工具集：`search_sources`、`query_graph`、`find_path`、`aggregate_metrics`、`create_chart`。
-- 设计服务端 orchestrator，模型只选择工具和参数，实际数据访问由受控函数完成。
+- 将工具定义为有 Zod/Pydantic 输入输出契约的服务端能力，模型只选择工具和参数，实际数据访问由受控函数完成。
+- 扩展 LangGraph 状态：`messages`、`intent`、`tool_calls`、`observations`、`chart_spec`、`verification`、`remaining_steps`。
+- 增加 LangGraph 节点和条件边：
+  - `classify_intent`：区分问答、图查询、指标分析和图表生成；
+  - `select_tools`：生成受约束的工具计划；
+  - `execute_tools`：并行执行无依赖只读工具；
+  - `verify_evidence`：检查答案主张是否有来源支持；
+  - `build_chart_spec`：生成安全图表 DSL；
+  - `revise_or_finish`：根据验证结果重试一次或结束。
+- 设置 `remaining_steps`、每工具超时、最大结果量和最多一次修订，防止 Agent 无限循环。
+- 使用 checkpoint 支持按 `thread_id` 恢复会话，并设计显式清理策略；本地版优先 SQLite，接口保留替换空间。
+- 对需要用户确认或高成本调用的节点预留 interrupt/resume 机制，但第一版不自动执行外部写操作。
 - `create_chart` 输出受约束的图表 DSL，再转换为 ECharts option；禁止直接执行模型生成的 JavaScript formatter。
 - 在 UI 显示计划、工具调用、输入摘要、输出摘要、耗时和失败恢复。
 - 支持“把当前筛选结果生成图表”和“解释当前图表异常点”。
@@ -409,8 +488,24 @@ workers/
 
 - 至少三个问题会触发不同工具链，并得到可重复结果。
 - Agent 生成的图表不执行任意代码。
+- 条件路由、工具循环上限、checkpoint 恢复和一次修订路径均有测试。
+- 刷新页面后可以通过 `thread_id` 恢复已保存的运行记录，且过期 checkpoint 可清理。
 - 工具调用失败时能给出局部结果或明确恢复路径。
 - Trace 中不泄露 API Key、完整环境变量或不必要的内部日志。
+
+### 阶段 7 推荐状态图
+
+```text
+START → classify_intent → select_tools
+                              ↓
+                         execute_tools
+                              ↓
+                       verify_evidence
+                         ↙          ↘
+             revise（最多 1 次）   build_chart_spec（按需）
+                         ↘          ↙
+                            finalize → END
+```
 
 ## 阶段 8：质量、性能优化与作品化交付
 
@@ -500,6 +595,10 @@ workers/
 | --- | --- | --- |
 | GraphRAG 构建耗时和模型成本过高 | 演示不可控 | 保留预构建项目导入；提供小数据集和 Ollama 路径 |
 | CLI 输出格式变化 | 聊天流解析失败 | CLI adapter 隔离、契约测试、版本固定 |
+| LangGraph 与现有手写聊天流程并存 | 状态不一致、重复执行、难以排错 | 阶段 2 完成后以 LangGraph run 为唯一执行源，旧流程仅保留短期 feature flag 回退 |
+| LangGraph/GraphRAG 版本不兼容 | 安装失败或运行行为变化 | 固定依赖版本和 `uv.lock`，建立 mock adapter 与端到端契约测试 |
+| Checkpoint 持续增长或串话 | 磁盘膨胀、会话数据混淆 | `thread_id + project_id` 隔离、TTL/显式清理、并发恢复测试 |
+| Agent 工具循环失控 | 成本、延迟和不可预测性上升 | 最大步数、单工具超时、结果上限、最多一次修订和取消贯通 |
 | 3D 图无法扩展到十万级 | 页面卡顿或崩溃 | 3D 作为精细模式，大图使用 GPU 批量渲染器 |
 | 同时引入 ECharts、Three.js、大图引擎导致包过大 | 首屏变慢 | 工作区动态 import、路由分包、Bundle 分析 |
 | WebGPU 兼容性不足 | 部分机器不可用 | WebGPU 渐进增强，WebGL/Canvas 降级 |
@@ -532,6 +631,8 @@ workers/
 - WebGL 十万级大图渲染模式及基准报告。
 - Embedding 聚类和相似性探索视图。
 - 带引用、图谱联动和 Agent Trace 的流式问答。
+- 一套由 LangGraph 驱动、可取消、可恢复、带条件分支和 checkpoint 的 Agent 工作流。
+- 一组 GraphRAG 检索、指标聚合、证据验证和安全图表生成工具。
 - 自动化测试、CI、ADR、架构图和演示材料。
 - 一份明确区分“上游已有能力”和“个人二次开发贡献”的说明。
 
