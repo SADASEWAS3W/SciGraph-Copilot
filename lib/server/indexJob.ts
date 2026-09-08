@@ -103,6 +103,15 @@ export async function stopIndexJob(): Promise<{ ok: boolean; code: string; jobId
   // Wait for the close handler to record the terminal state so callers that
   // clear or inspect the job right after stopping see a settled status.
   for (let attempt = 0; attempt < 20 && job.status === 'running'; attempt++) await wait(100)
+  // A failed spawn or a detached process that vanished may never deliver a
+  // close event. Do not leave the UI locked in a permanently running state.
+  if (stopped && job.status === 'running') {
+    job.status = 'stopped'
+    job.finishedAt = Date.now()
+    try { job.emitter.emit('event', { type: 'status', message: 'Indexing stopped' } satisfies IndexJobEvent) } catch {}
+    try { job.emitter.emit('event', { type: 'done', ok: false, code: 'STOPPED' } satisfies IndexJobEvent) } catch {}
+    job.emitter.removeAllListeners()
+  }
   return { ok: stopped, code: stopped ? 'STOPPED' : 'STOP_FAILED', jobId: job.id }
 }
 
@@ -390,7 +399,16 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
   // The provider preflight makes a synthetic request some OpenAI projects
   // reject even while real GraphRAG prompts succeed, so validation is
   // skipped; the engine-log watcher below surfaces real provider failures.
-  const child = spawn('uv', ['run', 'graphrag', 'index', '--root', root, '--method', job.method, '--skip-validation'], { cwd: root, env, detached: true })
+  const localGraphRag = path.join(repositoryRoot, '.venv', process.platform === 'win32' ? 'Scripts/graphrag.exe' : 'bin/graphrag')
+  let command = 'uv'
+  let args = ['run', 'graphrag', 'index', '--root', root, '--method', job.method, '--skip-validation']
+  try {
+    await fs.access(localGraphRag)
+    command = localGraphRag
+    args = ['index', '--root', root, '--method', job.method, '--skip-validation']
+  } catch {}
+  log(`RUNNER �� ${command === localGraphRag ? 'project .venv' : 'uv from PATH'}`)
+  const child = spawn(command, args, { cwd: root, env, detached: true })
   job.child = child
   emit({ type: 'job', id: job.id, status: 'RUNNING' })
   setProgress(2)
