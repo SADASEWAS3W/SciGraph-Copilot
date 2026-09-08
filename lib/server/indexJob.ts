@@ -408,7 +408,11 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
     args = ['index', '--root', root, '--method', job.method, '--skip-validation']
   } catch {}
   log(`RUNNER �� ${command === localGraphRag ? 'project .venv' : 'uv from PATH'}`)
-  const child = spawn(command, args, { cwd: root, env, detached: true })
+  // Windows console launchers (including the Python-generated graphrag.exe)
+  // are not reliable when spawned as detached children with piped output:
+  // the launcher can close while its Python process is still starting. Keep
+  // it attached on Windows; Unix still uses a process group for clean stops.
+  const child = spawn(command, args, { cwd: root, env, detached: process.platform !== 'win32' })
   job.child = child
   emit({ type: 'job', id: job.id, status: 'RUNNING' })
   setProgress(2)
@@ -529,8 +533,16 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
   }
   const engineWatcher = setInterval(() => { void pollEngineLog() }, 1500)
 
-  child.on('close', (code) => {
+  child.on('error', (error) => {
+    const message = `RUNNER ERROR - ${error.message}`
+    pipelineFailed = true
+    job.fatalError = message
+    log(message)
+  })
+
+  child.on('close', (code, signal) => {
     void (async () => {
+      log(`RUNNER EXIT - code ${code ?? 'none'}${signal ? `, signal ${signal}` : ''}`)
       clearInterval(engineWatcher)
       await pollEngineLog().catch(() => {})
       await conversionChain.catch(() => {})
