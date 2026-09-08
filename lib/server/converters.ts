@@ -68,7 +68,15 @@ async function readParquetViaPython(filePath: string): Promise<unknown[]> {
     // Write large conversions to disk instead of stdout. Node's execFile
     // buffer is intentionally small and truncating community reports here
     // left the graph without its generated labels.
-    await execFileP('uv', ['run', 'python', '-c', code, filePath, jsonPath], {
+    const localPython = path.join(process.cwd(), '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
+    let command = 'uv'
+    let args = ['run', 'python', '-c', code, filePath, jsonPath]
+    try {
+      await fs.access(localPython)
+      command = localPython
+      args = ['-c', code, filePath, jsonPath]
+    } catch {}
+    await execFileP(command, args, {
       cwd: path.dirname(path.dirname(filePath)),
     })
     const raw = await fs.readFile(jsonPath, 'utf-8')
