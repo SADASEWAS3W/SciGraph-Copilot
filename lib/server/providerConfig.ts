@@ -135,6 +135,10 @@ export async function getProviderStatus() {
 export async function resolveProviderEnv(provider: BuildProvider, source: NodeJS.ProcessEnv = process.env) {
   const stored = await readProviderConfig()
   const env = { ...source }
+  // Fast indexing uses NLTK corpora. Keep them in a project-local ASCII path
+  // because NLTK/GraphRAG can fail to rediscover downloads under Windows user
+  // profiles whose names contain non-ASCII characters.
+  env.NLTK_DATA = env.NLTK_DATA || path.join(process.cwd(), '.nltk_data')
   if (provider === 'local') {
     env.GRAPHRAG_COMPLETION_PROVIDER = 'ollama'
     env.GRAPHRAG_COMPLETION_MODEL = stored.local?.completionModel || LOCAL_DEFAULTS.completionModel

@@ -53,3 +53,4 @@ yarn-error.log*
 input/_pdfs/
 input/
 .graphrag/
+.nltk_data/
