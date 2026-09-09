@@ -8,7 +8,10 @@
     "build": "next build --turbopack",
     "start": "next start --hostname 127.0.0.1",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "harness:check": "pwsh -NoProfile -File .agent-harness/scripts/test-harness-contract.ps1",
+    "harness:hygiene": "pwsh -NoProfile -File .agent-harness/scripts/test-branch-hygiene.ps1",
+    "harness:quality": "pwsh -NoProfile -File .agent-harness/scripts/run-quality-gates.ps1"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",

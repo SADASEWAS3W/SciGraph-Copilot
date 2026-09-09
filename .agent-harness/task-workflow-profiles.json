@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "finalTestPolicy": "Run the complete quality gate once after all implementation phases are complete, not after every phase.",
+  "profiles": {
+    "ui-change": {
+      "lane": "L1",
+      "paths": ["app/**/*.tsx", "components/**/*.tsx", "app/globals.css"],
+      "rules": ["coding-standards.md", "visualization-performance.md"],
+      "workflow": "feature.md",
+      "finalChecks": ["typecheck", "lint", "build"]
+    },
+    "api-change": {
+      "lane": "L2",
+      "paths": ["app/api/**/*.ts"],
+      "rules": ["architecture-rules.md", "coding-standards.md", "ai-provider-rules.md"],
+      "workflow": "feature.md",
+      "finalChecks": ["typecheck", "lint", "build", "harness-contract"]
+    },
+    "indexing-change": {
+      "lane": "L3",
+      "paths": ["lib/server/indexJob.ts", "lib/server/graphragEnv.ts", "settings.yaml", "pyproject.toml", "uv.lock"],
+      "rules": ["architecture-rules.md", "ai-provider-rules.md", "graph-data-contracts.md"],
+      "workflow": "indexing-change.md",
+      "finalChecks": ["index-lifecycle", "typecheck", "lint", "build", "uv-lock"]
+    },
+    "graph-data-change": {
+      "lane": "L2",
+      "paths": ["lib/server/converters.ts", "lib/graphData.ts", "app/api/data/**/*.ts"],
+      "rules": ["graph-data-contracts.md", "architecture-rules.md"],
+      "workflow": "feature.md",
+      "finalChecks": ["graph-contract", "typecheck", "lint", "build"]
+    },
+    "visualization-change": {
+      "lane": "L3",
+      "paths": ["components/GraphVisualizer.tsx", "lib/forceSimulation.ts", "lib/graphData.ts"],
+      "rules": ["visualization-performance.md", "graph-data-contracts.md"],
+      "workflow": "visualization-change.md",
+      "finalChecks": ["graph-contract", "typecheck", "lint", "build", "manual-performance-evidence"]
+    },
+    "agent-feature": {
+      "lane": "L3",
+      "paths": ["app/api/chat/**/*.ts", "components/ChatPanel.tsx", "lib/agent/**/*.ts", "agent/**/*.py"],
+      "rules": ["architecture-rules.md", "ai-provider-rules.md", "graph-data-contracts.md"],
+      "workflow": "agent-feature.md",
+      "finalChecks": ["agent-contract", "typecheck", "lint", "build"]
+    },
+    "documentation": {
+      "lane": "L0",
+      "paths": ["**/*.md", ".agent-harness/**"],
+      "rules": ["coding-standards.md"],
+      "workflow": "feature.md",
+      "finalChecks": ["harness-contract", "branch-hygiene"]
+    }
+  },
+  "lanes": {
+    "L0": "Read-only analysis and documentation",
+    "L1": "Localized UI or low-risk behavior",
+    "L2": "API, provider configuration, or graph data contract",
+    "L3": "Processes, destructive files, secrets, LangGraph orchestration, or large-scale WebGL"
+  }
+}

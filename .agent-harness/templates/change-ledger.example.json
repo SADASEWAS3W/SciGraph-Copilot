@@ -1,0 +1,16 @@
+{
+  "taskId": "example-task",
+  "profile": "indexing-change",
+  "lane": "L3",
+  "status": "verified",
+  "affectedPaths": ["lib/server/indexJob.ts"],
+  "rootCause": "Describe the verified cause; do not use this field for an unverified guess.",
+  "changeSummary": "Describe the implemented behavior.",
+  "verification": {
+    "automated": ["pnpm harness:quality"],
+    "manual": [],
+    "result": "passed"
+  },
+  "remainingRisks": [],
+  "sensitiveDataIncluded": false
+}
