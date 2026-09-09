@@ -21,12 +21,20 @@ SciGraph Copilot 是面向科研文献的 AI 知识分析与可视化平台。�
 
 ## 3. 当前基础与开发范围
 
-当前代码已具备 Next.js 16、React 19、TypeScript、Three.js、React Three Fiber、`d3-force-3d`、Microsoft GraphRAG 3.1、OpenAI/Ollama 配置、文档上传与索引、SSE 流式聊天及基础图谱交互。
+当前代码已具备 Next.js 16、React 19、TypeScript、Three.js、React Three Fiber、`d3-force-3d`、Microsoft GraphRAG 3.1、OpenAI/Ollama 配置、文档上传与索引及基础图谱交互。
+
+AI 对话目前属于“底层能力已存在、用户入口未完成”的状态：
+
+- `components/ChatPanel.tsx` 已实现基础输入框、查询模式、消息展示和 SSE 消费逻辑。
+- `/api/chat` 与 `/api/chat/stream` 已具备 GraphRAG 查询和流式返回能力。
+- `app/page.tsx` 尚未引入或渲染 `ChatPanel`，当前图谱页面没有 AI 对话按钮。
+- 对话面板与知识图谱的实体高亮状态尚未真正接通，因此用户现在无法从页面打开 AI 对话。
 
 基础版重点补充：
 
 - SciGraph Copilot 品牌和中文界面。
 - 基础 LangGraph 问答工作流。
+- AI 对话入口、主页面挂载和面板开关状态。
 - 可靠的流式事件、引用和实体协议。
 - ECharts 科研数据分析看板。
 - AI 回答、图表与 3D 图谱联动。
@@ -171,14 +179,16 @@ LangGraph 负责编排问答步骤，GraphRAG 负责索引和知识检索，Next
 
 | 前端负责人 | Agent 负责人 |
 | --- | --- |
+| 在主页面接入现有 `ChatPanel`，增加明确的 AI 对话入口 | 核对现有 `/api/chat/stream` 与 GraphRAG CLI 的真实调用链路 |
+| 实现对话侧边栏的打开、关闭、宽度和移动端显示状态 | 将现有查询流程迁移到基础 LangGraph 工作流 |
 | 开发对话消息、输入框和查询模式选择 | 实现“校验问题→GraphRAG 检索→整理结果→返回答案”工作流 |
 | 消费 SSE 并显示 Token、节点步骤和耗时 | 输出约定的节点、Token、引用和实体事件 |
 | 实现停止生成、重试、错误和无结果状态 | 实现 Abort、超时、模型异常和检索异常处理 |
-| 开发引用卡片及实体点击交互 | 将 GraphRAG 结果规范化为引用和实体结构 |
+| 开发引用卡片、实体点击和图谱节点高亮交互 | 将 GraphRAG 结果规范化为引用和实体结构 |
 
 共同交付：一条真实端到端问答链路，以及 local、global、drift 查询模式。
 
-阶段验收：回答可流式展示并停止；至少显示来源或证据片段；点击实体或引用可触发图谱定位；节点执行顺序可见。
+阶段验收：用户能从图谱页面明确打开和关闭 AI 对话；回答可流式展示并停止；至少显示来源或证据片段；点击实体或引用可触发图谱定位；图谱选中状态能反馈到对话上下文；节点执行顺序可见。
 
 ### 阶段 3：ECharts 科研数据看板（1 周）
 
