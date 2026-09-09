@@ -178,6 +178,18 @@ async function publishJobWorkspace(job: IndexJob, repositoryRoot: string, includ
   await fs.copyFile(path.join(job.workRoot, 'logs_history.log'), path.join(projectRoot, 'logs_history.log')).catch(() => {})
 }
 
+async function applyLocalFastProfile(workRoot: string) {
+  const settingsPath = path.join(workRoot, 'settings.yaml')
+  const original = await fs.readFile(settingsPath, 'utf8')
+  const optimized = original
+    .replace(/(chunking:\s*[\s\S]*?\n\s*size:)\s*\d+/, '$1 3000')
+    .replace(/(chunking:\s*[\s\S]*?\n\s*overlap:)\s*\d+/, '$1 80')
+    .replace(/(cluster_graph:\s*[\s\S]*?\n\s*max_cluster_size:)\s*\d+/, '$1 50')
+    .replace(/(community_reports:\s*[\s\S]*?\n\s*max_length:)\s*\d+/, '$1 300')
+    .replace(/(community_reports:\s*[\s\S]*?\n\s*max_input_length:)\s*\d+/, '$1 2500')
+  await fs.writeFile(settingsPath, optimized)
+}
+
 export async function startIndexJob(method: 'standard' | 'fast', buildProvider: BuildProvider): Promise<{ job?: IndexJob; error?: string }> {
   if (isIndexRunning()) return { error: 'INDEX_ALREADY_RUNNING' }
 
@@ -204,6 +216,9 @@ export async function startIndexJob(method: 'standard' | 'fast', buildProvider: 
   }
   for (const entry of ['settings.yaml', 'prompts']) {
     await fs.cp(path.join(repositoryRoot, entry), path.join(workRoot, entry), { recursive: true, force: true }).catch(() => {})
+  }
+  if (method === 'fast' && buildProvider === 'local') {
+    await applyLocalFastProfile(workRoot)
   }
   await fs.mkdir(path.join(workRoot, 'input'), { recursive: true })
   await fs.mkdir(path.join(workRoot, 'output'), { recursive: true })
@@ -272,7 +287,7 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
   // Fresh terminal history for this build.
   await fs.writeFile(logHistoryPath, '').catch(() => {})
   emit({ type: 'status', message: 'Preparing dataset…' })
-  log(`BUILD · ${job.projectName} · MODEL ${job.provider.toUpperCase()} · ${completionModel} · EMBEDDING ${embeddingModel} · CONCURRENCY ${concurrency}`)
+  log(`BUILD · ${job.projectName} · ${job.method === 'fast' && job.buildProvider === 'local' ? 'LOCAL FAST' : 'STANDARD'} · MODEL ${job.provider.toUpperCase()} · ${completionModel} · EMBEDDING ${embeddingModel} · CONCURRENCY ${concurrency}`)
 
   // ---- Dataset preparation: stage removals, convert PDFs to text ----
   const inputDir = path.join(root, 'input')

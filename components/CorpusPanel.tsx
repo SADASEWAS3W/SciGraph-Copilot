@@ -334,7 +334,8 @@ export default function CorpusPanel({ onProjectNamed, onProjectDeleted }: { onPr
     setActiveBuildProvider(provider)
     setJobProjectName(state.kgName || null)
     setAnyJobRunning(true)
-    const source = new EventSource(`/api/corpus/index/stream?provider=${provider}`)
+    const method = provider === 'local' ? 'fast' : 'standard'
+    const source = new EventSource(`/api/corpus/index/stream?provider=${provider}&method=${method}`)
     sseRef.current = source
     source.onmessage = event => {
       try {
@@ -540,7 +541,7 @@ export default function CorpusPanel({ onProjectNamed, onProjectDeleted }: { onPr
                   </div>
                 ) : (
                   <>
-                    <Button variant="outline" size="sm" className="h-8 rounded-none text-[10px]" onClick={() => startIndex('local')} disabled={!files.length}><HardDrive className="h-3 w-3" /> Run with Ollama</Button>
+                    <Button variant="outline" size="sm" className="h-8 rounded-none text-[10px]" onClick={() => startIndex('local')} disabled={!files.length}><HardDrive className="h-3 w-3" /> Run local fast</Button>
                     <Button size="sm" className="h-8 rounded-none text-[10px]" onClick={() => startIndex('cloud')} disabled={!files.length}><Cloud className="h-3 w-3" /> Run with OpenAI</Button>
                   </>
                 )}

@@ -25,14 +25,14 @@ export function resolveGraphRagEnv(source: NodeJS.ProcessEnv = process.env): {
     embeddingModel = env.GRAPHRAG_EMBEDDING_MODEL || 'configured'
   } else {
     env.GRAPHRAG_COMPLETION_PROVIDER = 'ollama'
-    env.GRAPHRAG_COMPLETION_MODEL = 'gemma3:4b'
+    env.GRAPHRAG_COMPLETION_MODEL = 'gemma3:1b'
     env.GRAPHRAG_COMPLETION_API_BASE = 'http://127.0.0.1:11434'
     env.GRAPHRAG_EMBEDDING_PROVIDER = 'ollama'
     env.GRAPHRAG_EMBEDDING_MODEL = 'nomic-embed-text:latest'
     env.GRAPHRAG_EMBEDDING_API_BASE = 'http://127.0.0.1:11434'
     env.GRAPHRAG_API_KEY = 'ollama'
     provider = 'ollama'
-    completionModel = 'gemma3:4b'
+    completionModel = 'gemma3:1b'
     embeddingModel = 'nomic-embed-text:latest'
   }
 
