@@ -9,7 +9,7 @@ const configDir = () => path.join(process.cwd(), '.graphrag')
 const configPath = () => path.join(configDir(), 'providers.json')
 
 export const LOCAL_DEFAULTS = {
-  completionModel: 'gemma4:latest',
+  completionModel: 'gemma3:4b',
   embeddingModel: 'embeddinggemma:latest',
   embeddingVectorSize: 768,
 } as const
