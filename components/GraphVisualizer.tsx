@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useRef, useState, useEffect, useMemo } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame, useThree, type ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, Text, Line } from '@react-three/drei';
 import * as THREE from 'three';
 import { Node3D, Link3D, GraphLayout, calculateLinkThickness } from '../lib/forceSimulation';
@@ -25,6 +25,7 @@ interface NodeProps {
   hasSelectedNode: boolean;
   sharedMaterial: THREE.ShaderMaterial;
   sharedGeometry: THREE.SphereGeometry;
+  showLabel: boolean;
   onClick: (node: Node3D) => void;
   onPointerOver: (node: Node3D) => void;
   onPointerOut: () => void;
@@ -43,7 +44,7 @@ function useBillboard() {
   return ref;
 }
 
-function Node({ node, isSelected, isHighlighted, isInHierarchy, communityMode, hasSelectedNode, sharedMaterial, sharedGeometry, onClick, onPointerOver, onPointerOut }: NodeProps) {
+function Node({ node, isSelected, isHighlighted, isInHierarchy, communityMode, hasSelectedNode, sharedMaterial, sharedGeometry, showLabel, onClick, onPointerOver, onPointerOut }: NodeProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const textRef = useBillboard();
   
@@ -63,6 +64,8 @@ function Node({ node, isSelected, isHighlighted, isInHierarchy, communityMode, h
     };
     return clonedMaterial;
   }, [sharedMaterial]);
+
+  useEffect(() => () => nodeMaterial?.dispose(), [nodeMaterial]);
 
   useFrame((state) => {
     if (meshRef.current) {
@@ -100,7 +103,7 @@ function Node({ node, isSelected, isHighlighted, isInHierarchy, communityMode, h
         )}
       </mesh>
       {/* Show labels only for hierarchy nodes in isolator mode, or always in normal mode */}
-      {(!hasSelectedNode || communityMode !== 'auto' || isInHierarchy) && (
+      {showLabel && (!hasSelectedNode || communityMode !== 'auto' || isInHierarchy) && (
         <group ref={textRef} position={[0, size + 3, 0]}>
           <Text
             fontSize={Math.max(0.8, size * 0.5)}
@@ -117,6 +120,95 @@ function Node({ node, isSelected, isHighlighted, isInHierarchy, communityMode, h
           </Text>
         </group>
       )}
+    </group>
+  );
+}
+
+interface InstancedNodeCloudProps {
+  nodes: Node3D[];
+  selectedNodeId?: string;
+  highlightedNodeIds: Set<string>;
+  nodesInHierarchy: Set<string>;
+  communityMode: 'off' | 'auto' | 'all';
+  hasSelectedNode: boolean;
+  onClick: (node: Node3D) => void;
+  onPointerOver: (node: Node3D) => void;
+  onPointerOut: () => void;
+}
+
+function InstancedNodeCloud({ nodes, selectedNodeId, highlightedNodeIds, nodesInHierarchy, communityMode, hasSelectedNode, onClick, onPointerOver, onPointerOut }: InstancedNodeCloudProps) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const transform = useMemo(() => new THREE.Object3D(), []);
+  const color = useMemo(() => new THREE.Color(), []);
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+
+    nodes.forEach((node, index) => {
+      const selected = node.id === selectedNodeId;
+      const highlighted = highlightedNodeIds.has(node.id);
+      const faded = hasSelectedNode && communityMode === 'auto' && !nodesInHierarchy.has(node.id);
+      const scale = node.computedSize * (selected ? 1.5 : highlighted ? 1.25 : 1);
+      transform.position.set(node.x, node.y, node.z);
+      transform.scale.setScalar(scale);
+      transform.updateMatrix();
+      mesh.setMatrixAt(index, transform.matrix);
+      color.set(selected ? '#ffffff' : highlighted ? '#ea5c22' : faded ? '#17302f' : '#62d9d1');
+      mesh.setColorAt(index, color);
+    });
+    mesh.count = nodes.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [color, communityMode, hasSelectedNode, highlightedNodeIds, nodes, nodesInHierarchy, selectedNodeId, transform]);
+
+  const nodeFromEvent = (event: ThreeEvent<MouseEvent>) => {
+    const index = event.instanceId;
+    return index === undefined ? undefined : nodes[index];
+  };
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, nodes.length]}
+      onClick={event => {
+        event.stopPropagation();
+        const node = nodeFromEvent(event);
+        if (node) onClick(node);
+      }}
+      onPointerMove={event => {
+        const node = nodeFromEvent(event);
+        if (node) onPointerOver(node);
+      }}
+      onPointerOut={onPointerOut}
+      onUpdate={mesh => mesh.layers.enable(BLOOM_SCENE)}
+    >
+      <sphereGeometry args={[1, 8, 8]} />
+      <meshBasicMaterial vertexColors transparent opacity={0.88} toneMapped={false} />
+    </instancedMesh>
+  );
+}
+
+function NodeLabel({ node, emphasized }: { node: Node3D; emphasized: boolean }) {
+  const textRef = useBillboard();
+  const size = node.computedSize;
+  return (
+    <group position={[node.x, node.y, node.z]}>
+      <group ref={textRef} position={[0, size + 3, 0]}>
+        <Text
+          fontSize={Math.max(0.8, size * 0.5)}
+          color={emphasized ? '#ffffff' : '#b7c3c0'}
+          outlineWidth={0.05}
+          outlineColor="#05080b"
+          anchorX="center"
+          anchorY="middle"
+          maxWidth={25}
+          textAlign="center"
+        >
+          {node.title.length > 25 ? `${node.title.substring(0, 25)}...` : node.title}
+        </Text>
+      </group>
     </group>
   );
 }
@@ -415,10 +507,13 @@ export default function GraphVisualizer({
   const orbitControlsRef = useRef<React.ElementRef<typeof OrbitControls> | null>(null);
   
   // Shared materials for performance optimization
+  const graphSize = layout?.nodes.length ?? 0;
+  const sphereSegments = graphSize > 5000 ? 8 : graphSize > 1000 ? 12 : 20;
   const sharedNodeMaterial = useMemo(() => createSharedNodeMaterial(), []) as unknown as THREE.ShaderMaterial;
-  const sharedNodeGeometry = useMemo(() => new THREE.SphereGeometry(1, 32, 32), []);
+  const sharedNodeGeometry = useMemo(() => new THREE.SphereGeometry(1, sphereSegments, sphereSegments), [sphereSegments]);
 
   useEffect(() => () => sharedNodeGeometry.dispose(), [sharedNodeGeometry]);
+  useEffect(() => () => sharedNodeMaterial.dispose(), [sharedNodeMaterial]);
   
   // Debounced search term to improve performance
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
@@ -431,14 +526,14 @@ export default function GraphVisualizer({
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
-  const postFx: PostFXSettings = {
-    bloomEnabled: true,
-    bloomStrength: 0.66,
-    bloomRadius: 1.35,
+  const postFx = useMemo<PostFXSettings>(() => ({
+    bloomEnabled: graphSize <= 5000,
+    bloomStrength: graphSize > 1000 ? 0.42 : 0.66,
+    bloomRadius: graphSize > 1000 ? 0.8 : 1.35,
     bloomThreshold: 0.20,
-    vignetteEnabled: true,
+    vignetteEnabled: graphSize <= 5000,
     vignetteStrength: 0.18,
-  };
+  }), [graphSize]);
 
   // Create a set of node IDs that are in the visible communities (hierarchy)
   const nodesInHierarchy = useMemo(() => {
@@ -530,10 +625,34 @@ export default function GraphVisualizer({
     [admittedNodeCount, orderedNodes]
   );
   const admittedNodeIds = useMemo(() => new Set(admittedNodes.map(node => node.id)), [admittedNodes]);
-  const admittedLinks = useMemo(
-    () => filteredLinks.filter(link => admittedNodeIds.has(link.source.id) && admittedNodeIds.has(link.target.id)),
-    [admittedNodeIds, filteredLinks]
-  );
+  const admittedLinks = useMemo(() => {
+    const visible = filteredLinks.filter(link => admittedNodeIds.has(link.source.id) && admittedNodeIds.has(link.target.id));
+    const limit = graphSize > 5000 ? 12000 : graphSize > 1500 ? 8000 : Number.POSITIVE_INFINITY;
+    if (visible.length <= limit) return visible;
+    return [...visible].sort((a, b) => b.weight - a.weight).slice(0, limit);
+  }, [admittedNodeIds, filteredLinks, graphSize]);
+
+  const labelNodeIds = useMemo(() => {
+    if (orderedNodes.length <= 240) return new Set(orderedNodes.map(node => node.id));
+    const limit = orderedNodes.length > 5000 ? 36 : orderedNodes.length > 1000 ? 60 : 100;
+    const ranked = [...orderedNodes]
+      .sort((a, b) => (b.degree + b.frequency) - (a.degree + a.frequency))
+      .slice(0, limit)
+      .map(node => node.id);
+    if (selectedNode) ranked.push(selectedNode.id);
+    if (hoveredNode) ranked.push(hoveredNode.id);
+    for (const id of searchMatchingNodes) ranked.push(id);
+    for (const id of ragHighlightedNodeIds ?? []) ranked.push(id);
+    return new Set(ranked);
+  }, [hoveredNode, orderedNodes, ragHighlightedNodeIds, searchMatchingNodes, selectedNode]);
+
+  const maxPixelRatio = graphSize > 5000 ? 1 : graphSize > 1000 ? 1.25 : 1.75;
+  const highPerformanceMode = graphSize > 1500;
+  const effectiveHighlightedNodeIds = useMemo(() => {
+    const ids = new Set(ragHighlightedNodeIds ?? []);
+    if (hoveredNode) ids.add(hoveredNode.id);
+    return ids;
+  }, [hoveredNode, ragHighlightedNodeIds]);
 
   // Compute a key for Canvas remount when filters change (no extra hooks).
   const canvasKeyStr = `types:${Array.from(selectedEntityTypes).sort().join(',')}|lvl:${selectedLevel ?? 'all'}|w:${minRelationshipWeight}|b:${showCommunityBoundaries ? 1 : 0}`
@@ -642,9 +761,10 @@ export default function GraphVisualizer({
           near: 0.1 
         }}
         style={{ background: '#0a0a0a', width: '100%', height: '100%' }}
-        gl={{ antialias: true, alpha: false }}
+        dpr={[1, maxPixelRatio]}
+        gl={{ antialias: graphSize <= 5000, alpha: false, powerPreference: 'high-performance' }}
         onCreated={({ gl }) => {
-          gl.setPixelRatio(Math.min(2, window.devicePixelRatio));
+          gl.setPixelRatio(Math.min(maxPixelRatio, window.devicePixelRatio));
           gl.toneMapping = THREE.ACESFilmicToneMapping;
           gl.toneMappingExposure = 1.2;
           gl.outputColorSpace = THREE.SRGBColorSpace;
@@ -675,7 +795,7 @@ export default function GraphVisualizer({
         {/* Nebula gradient plane and star dust */}
         <NebulaBackdrop />
         <group position={[0,0,-600]}>
-          <GalaxyBackground count={3500} position={[0,0,0]} />
+          <GalaxyBackground count={graphSize > 5000 ? 700 : graphSize > 1000 ? 1600 : 2800} position={[0,0,0]} />
         </group>
 
         <OrbitControls
@@ -694,21 +814,43 @@ export default function GraphVisualizer({
         />
 
         {/* Render nodes */}
-        {admittedNodes.map(node => {
-          // Hide node if search is active and node doesn't match
+        {highPerformanceMode ? (
+          <>
+            <InstancedNodeCloud
+              nodes={admittedNodes}
+              selectedNodeId={selectedNode?.id}
+              highlightedNodeIds={effectiveHighlightedNodeIds}
+              nodesInHierarchy={nodesInHierarchy}
+              communityMode={communityMode}
+              hasSelectedNode={selectedNode !== null}
+              onClick={handleNodeClick}
+              onPointerOver={handleNodeHover}
+              onPointerOut={handleNodeHoverOut}
+            />
+            {admittedNodes
+              .filter(node => labelNodeIds.has(node.id) && (!debouncedSearchTerm.trim() || searchMatchingNodes.has(node.id)))
+              .map(node => (
+                <NodeLabel
+                  key={`label-${node.id}`}
+                  node={node}
+                  emphasized={node.id === selectedNode?.id || effectiveHighlightedNodeIds.has(node.id)}
+                />
+              ))}
+          </>
+        ) : admittedNodes.map(node => {
           const isVisible = !debouncedSearchTerm.trim() || searchMatchingNodes.has(node.id);
-          
           return (
             <group key={node.id} visible={isVisible}>
               <Node
                 node={node}
                 isSelected={selectedNode?.id === node.id}
-                isHighlighted={hoveredNode?.id === node.id || (ragHighlightedNodeIds?.has(node.id) ?? false)}
+                isHighlighted={effectiveHighlightedNodeIds.has(node.id)}
                 isInHierarchy={nodesInHierarchy.has(node.id)}
                 communityMode={communityMode}
                 hasSelectedNode={selectedNode !== null}
                 sharedMaterial={sharedNodeMaterial}
                 sharedGeometry={sharedNodeGeometry}
+                showLabel={labelNodeIds.has(node.id)}
                 onClick={handleNodeClick}
                 onPointerOver={handleNodeHover}
                 onPointerOut={handleNodeHoverOut}
@@ -727,7 +869,7 @@ export default function GraphVisualizer({
           // Check if energy edge should be shown in isolator mode
           const sourceInHierarchy = nodesInHierarchy.has(link.source.id);
           const targetInHierarchy = nodesInHierarchy.has(link.target.id);
-          const showEnergyEdge = (heroEdgeIds.has(link.id) || highlightedLinks.has(link.id)) && 
+          const showEnergyEdge = (!highPerformanceMode || highlightedLinks.has(link.id)) && (heroEdgeIds.has(link.id) || highlightedLinks.has(link.id)) &&
             // In isolator mode, only show energy edges within hierarchy
             (communityMode !== 'auto' || !selectedNode || (sourceInHierarchy && targetInHierarchy));
           
@@ -750,7 +892,7 @@ export default function GraphVisualizer({
         })}
 
         {/* Render community boundaries */}
-        {showCommunityBoundaries && admittedNodeCount >= orderedNodes.length && (visibleCommunities || layout?.communities || []).map(community => {
+        {showCommunityBoundaries && (!highPerformanceMode || selectedNode) && admittedNodeCount >= orderedNodes.length && (visibleCommunities || layout?.communities || []).map(community => {
           // Check if community has any visible nodes when search is active
           const hasVisibleNodes = debouncedSearchTerm.trim() ? 
             community.entity_ids.some((entityId: string) => searchMatchingNodes.has(entityId)) :
@@ -770,7 +912,7 @@ export default function GraphVisualizer({
         })}
 
         {/* Postprocessing: selective bloom + vignette overlay */}
-        <SelectiveBloomEffects settings={postFx} />
+        {graphSize <= 5000 && <SelectiveBloomEffects settings={postFx} />}
       </Canvas>
 
       {(loading || (layout && admittedNodeCount < orderedNodes.length)) && (
@@ -943,6 +1085,7 @@ function NebulaBackdrop() {
       void main(){ vec3 col=mix(cBot,cTop, vUv.y); gl_FragColor=vec4(col,1.0); }
     `
   }), []);
+  useEffect(() => () => mat.dispose(), [mat]);
   return (
     <mesh position={[0,0,-800]} onUpdate={(m)=>m.layers.disable(BLOOM_SCENE)}>
       <planeGeometry args={[4000, 2500]} />
@@ -975,6 +1118,7 @@ function SelectiveBloomEffects({ settings }: { settings: PostFXSettings }) {
     m.depthWrite = false;
     return m;
   }, []);
+  useEffect(() => () => darkMaterial.dispose(), [darkMaterial]);
   
   const bloomLayers = useMemo(() => {
     const l = new THREE.Layers();

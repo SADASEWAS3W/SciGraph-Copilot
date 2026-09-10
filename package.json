@@ -9,6 +9,7 @@
     "start": "next start --hostname 127.0.0.1",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
     "harness:check": "pwsh -NoProfile -File .agent-harness/scripts/test-harness-contract.ps1",
     "harness:hygiene": "pwsh -NoProfile -File .agent-harness/scripts/test-branch-hygiene.ps1",
     "harness:quality": "pwsh -NoProfile -File .agent-harness/scripts/run-quality-gates.ps1"
@@ -50,6 +51,7 @@
     "cmdk": "^1.1.1",
     "d3-force-3d": "^3.0.6",
     "date-fns": "^4.1.0",
+    "echarts": "^6.1.0",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.542.0",
@@ -79,7 +81,8 @@
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.7",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "overrides": {

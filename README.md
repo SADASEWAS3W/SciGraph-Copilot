@@ -32,7 +32,17 @@ https://github.com/user-attachments/assets/1f588a45-07ca-4953-92ed-fc888fe28cff
 
 *Manage projects and monitor indexing while retaining the graph and selected-entity context.*
 
-Chat is intentionally absent from 2.0 while its next interaction model is designed.
+## SciGraph Copilot frontend
+
+The secondary frontend adds a Chinese AI4Science workspace on top of GraphRAG Workbench:
+
+- GraphRAG streaming chat with query modes, cancellable requests, visible execution steps, recoverable errors, citation markers, and entity highlights
+- a shared entity selection across chat, the Inspector, the 3D graph, and analytics
+- an ECharts research dashboard with entity distribution, community treemap, relationship Sankey, community-level trends, and entity-intensity heatmap
+- graph filters, progressive node admission, bounded labels, adaptive WebGL effects, and a Web Worker path for large layouts
+- an in-product demo guide for the document-to-evidence workflow
+
+See [the frontend development plan](docs/FRONTEND_DEVELOPMENT_PLAN.md) and [implementation report](docs/FRONTEND_IMPLEMENTATION_REPORT.md) for scope, architecture, and verification evidence.
 
 ## Requirements
 

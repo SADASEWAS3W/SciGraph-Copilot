@@ -69,16 +69,28 @@ export class ForceSimulation3D {
       .force('center', d3.forceCenter())
       .force('collision', d3.forceCollide())
       .alphaDecay(0.03)
-      .alphaMin(0.001);
+      .alphaMin(0.001)
+      .stop();
   }
 
-  generateLayout(graphData: GraphData): Promise<GraphLayout> {
+  async generateLayout(graphData: GraphData): Promise<GraphLayout> {
+    const workerPositions = graphData.entities.length >= 1000
+      ? await this.generateInitialPositionsInWorker(graphData).catch(() => null)
+      : null;
+
     return new Promise((resolve) => {
-      this.preprocessData(graphData);
+      this.preprocessData(graphData, workerPositions);
       this.setupForces();
       
       let iterationCount = 0;
-      const maxIterations = 500;
+      const maxIterations = graphData.entities.length > 5000 ? 0 : graphData.entities.length > 1000 ? 140 : 500;
+
+      if (maxIterations === 0) {
+        this.simulation.stop();
+        this.precomputeCommunityData();
+        resolve({ nodes: this.nodes, links: this.links, communities: this.communities });
+        return;
+      }
 
       this.simulation.on('tick', () => {
         iterationCount++;
@@ -101,7 +113,7 @@ export class ForceSimulation3D {
   }
 
 
-  private preprocessData(graphData: GraphData): void {
+  private preprocessData(graphData: GraphData, initialPositions: Map<string, { x: number; y: number; z: number }> | null = null): void {
     this.communities = graphData.communities;
     let minAbstraction = Infinity;
     let maxAbstraction = -Infinity;
@@ -145,15 +157,16 @@ export class ForceSimulation3D {
       const phi = Math.acos(1 - 2 * (index / graphData.entities.length)); // Uniform distribution
       const theta = goldenAngle * index;
       
-      // Add slight randomization to prevent perfect grid
-      const randomFactor = 0.9 + Math.random() * 0.2;
+      const hash = [...entity.id].reduce((value, character) => Math.imul(value ^ character.charCodeAt(0), 16777619), 2166136261);
+      const randomFactor = 0.92 + ((hash >>> 0) % 1600) / 10000;
       const adjustedRadius = finalRadius * randomFactor;
+      const workerPosition = initialPositions?.get(entity.id);
       
       return {
         ...entity,
-        x: adjustedRadius * Math.sin(phi) * Math.cos(theta),
-        y: adjustedRadius * Math.sin(phi) * Math.sin(theta), 
-        z: adjustedRadius * Math.cos(phi),
+        x: workerPosition?.x ?? adjustedRadius * Math.sin(phi) * Math.cos(theta),
+        y: workerPosition?.y ?? adjustedRadius * Math.sin(phi) * Math.sin(theta),
+        z: workerPosition?.z ?? adjustedRadius * Math.cos(phi),
         community,
         communityLevel,
         abstractionLevel: normalizedAbstraction, // Store for potential future use
@@ -190,6 +203,44 @@ export class ForceSimulation3D {
         };
       })
       .filter((link): link is Link3D => link !== null);
+  }
+
+  private generateInitialPositionsInWorker(graphData: GraphData): Promise<Map<string, { x: number; y: number; z: number }>> {
+    if (typeof Worker === 'undefined') return Promise.reject(new Error('Web Worker is unavailable'));
+
+    const entityToLevel = new Map<string, number>();
+    graphData.communities.forEach(community => {
+      community.entity_ids.forEach(entityId => entityToLevel.set(entityId, community.level));
+    });
+
+    return new Promise((resolve, reject) => {
+      const worker = new Worker(new URL('../workers/graphLayout.worker.ts', import.meta.url), { type: 'module' });
+      const timer = window.setTimeout(() => {
+        worker.terminate();
+        reject(new Error('Graph layout worker timed out'));
+      }, 10000);
+
+      worker.onmessage = (event: MessageEvent<Array<{ id: string; x: number; y: number; z: number }>>) => {
+        window.clearTimeout(timer);
+        worker.terminate();
+        resolve(new Map(event.data.map(position => [position.id, position])));
+      };
+      worker.onerror = () => {
+        window.clearTimeout(timer);
+        worker.terminate();
+        reject(new Error('Graph layout worker failed'));
+      };
+      worker.postMessage({
+        entities: graphData.entities.map(entity => ({
+          id: entity.id,
+          degree: entity.degree,
+          frequency: entity.frequency,
+          communityLevel: entityToLevel.get(entity.id) ?? 0,
+        })),
+        spread3D: this.config.spread3D,
+        levelSpacing: this.config.levelSpacing,
+      });
+    });
   }
 
   private setupForces(): void {

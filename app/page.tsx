@@ -1,517 +1,439 @@
-'use client';
+'use client'
 
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Eye, FolderKanban, Loader2, X } from 'lucide-react';
-import GraphVisualizer from '@/components/GraphVisualizer';
-import Inspector from '@/components/Inspector';
-import CorpusPanel from '@/components/CorpusPanel';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
-// SettingsModal removed
-import { GraphDataLoader, GraphData, type Community } from '../lib/graphData';
-import { ForceSimulation3D, GraphLayout, Node3D, defaultForceConfig } from '../lib/forceSimulation';
+import dynamic from 'next/dynamic'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BarChart3, Eye, Filter, FolderKanban, Loader2, MessageCircle, Network, PlayCircle, Search, X } from 'lucide-react'
+import ChatPanel from '@/components/ChatPanel'
+import CorpusPanel from '@/components/CorpusPanel'
+import DemoGuide from '@/components/DemoGuide'
+import GraphFilters from '@/components/GraphFilters'
+import GraphVisualizer from '@/components/GraphVisualizer'
+import Inspector from '@/components/Inspector'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { GraphDataLoader, type Community, type GraphData } from '@/lib/graphData'
+import { ForceSimulation3D, type GraphLayout, type Node3D, defaultForceConfig } from '@/lib/forceSimulation'
+
+const AnalyticsDashboard = dynamic(() => import('@/components/AnalyticsDashboard'), {
+  ssr: false,
+  loading: () => <div className="flex h-full items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />正在加载分析看板…</div>,
+})
+
+type WorkspaceView = 'graph' | 'analytics'
+
+function collectCommunityTree(selectedCommunity: Community, allCommunities: Community[]): Community[] {
+  const byHumanId = new Map(allCommunities.map(community => [String(community.human_readable_id), community]))
+  let root = selectedCommunity
+  const visitedParents = new Set<string>()
+
+  while (root.parent !== undefined && !visitedParents.has(root.id)) {
+    visitedParents.add(root.id)
+    const parent = byHumanId.get(String(root.parent))
+    if (!parent) break
+    root = parent
+  }
+
+  const childrenByParent = new Map<string, Community[]>()
+  for (const community of allCommunities) {
+    if (community.parent === undefined) continue
+    const parentId = String(community.parent)
+    childrenByParent.set(parentId, [...(childrenByParent.get(parentId) ?? []), community])
+  }
+
+  const result: Community[] = []
+  const queue = [root]
+  const visited = new Set<string>()
+  while (queue.length > 0) {
+    const community = queue.shift()
+    if (!community || visited.has(community.id)) continue
+    visited.add(community.id)
+    result.push(community)
+    const children = childrenByParent.get(String(community.human_readable_id)) ?? []
+    for (const child of children) queue.push(child)
+  }
+
+  return result.sort((a, b) => a.level - b.level)
+}
 
 export default function Home() {
-  const [layout, setLayout] = useState<GraphLayout | null>(null);
-  const [graphData, setGraphData] = useState<GraphData | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string>('Initializing...');
-  // track corpus presence implicitly; no explicit corpusState passed to visualizer
-  
-  // Selection state
-  const [selectedNode, setSelectedNode] = useState<Node3D | null>(null);
-  const [hoveredNode, setHoveredNode] = useState<Node3D | null>(null);
-  
-  // Filter states
-  const [selectedEntityTypes] = useState<Set<string>>(new Set());
-  const [minRelationshipWeight] = useState<number>(1);
-  // showCommunityBoundaries state removed
-  const [inspectorMode, setInspectorMode] = useState<boolean>(false);
-  const [selectedLevel] = useState<number | null>(null);
-  const [searchTerm, setSearchTerm] = useState<string>('');
-  const [projectPanelOpen, setProjectPanelOpen] = useState(false);
-  const [projectNameRequired, setProjectNameRequired] = useState(false);
-  const [currentProjectName, setCurrentProjectName] = useState('');
-  const [buildRunning, setBuildRunning] = useState(false);
-  const [ragHighlightedNodeIds] = useState<Set<string>>(new Set());
-  
-  // Settings modal removed
-  
-  // Simulation instance not kept in state
-  
-  // Ref for search input to enable focus
-  const searchInputRef = React.useRef<HTMLInputElement>(null);
+  const [activeView, setActiveView] = useState<WorkspaceView>('graph')
+  const [layout, setLayout] = useState<GraphLayout | null>(null)
+  const [graphData, setGraphData] = useState<GraphData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState('正在初始化…')
+  const [selectedNode, setSelectedNode] = useState<Node3D | null>(null)
+  const [hoveredNode, setHoveredNode] = useState<Node3D | null>(null)
+  const [selectedEntityTypes, setSelectedEntityTypes] = useState<Set<string>>(new Set())
+  const [minRelationshipWeight, setMinRelationshipWeight] = useState(0)
+  const [showCommunityBoundaries, setShowCommunityBoundaries] = useState(true)
+  const [inspectorMode, setInspectorMode] = useState(false)
+  const [selectedLevel, setSelectedLevel] = useState<number | null>(null)
+  const [searchTerm, setSearchTerm] = useState('')
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
+  const [guideOpen, setGuideOpen] = useState(false)
+  const [projectPanelOpen, setProjectPanelOpen] = useState(false)
+  const [projectNameRequired, setProjectNameRequired] = useState(false)
+  const [currentProjectName, setCurrentProjectName] = useState('')
+  const [buildRunning, setBuildRunning] = useState(false)
+  const [ragHighlightedNodeIds, setRagHighlightedNodeIds] = useState<Set<string>>(new Set())
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const loadingGraphRef = useRef(false)
 
-  // Check corpus state and load data intelligently
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        setLoading(true);
-        
-        // First check if we have any corpus data
-        setStatus('Checking for indexed data...');
-        const corpusRes = await fetch('/api/corpus/state', { cache: 'no-store' });
-        if (corpusRes.ok) {
-          const corpus = await corpusRes.json();
-          const requiresName = !corpus.kgName || !String(corpus.kgName).trim();
-          setCurrentProjectName(corpus.kgName ? String(corpus.kgName) : '');
-          setProjectNameRequired(requiresName);
-          if (requiresName) setProjectPanelOpen(true);
-          
-          // Imported GraphRAG output may not include source documents. The
-          // generated graph artifacts, not the upload registry, decide
-          // whether the constellation can load.
-          const hasIndex = corpus.outputStats && ((corpus.outputStats.entities ?? 0) + (corpus.outputStats.relationships ?? 0) + (corpus.outputStats.communities ?? 0) + (corpus.outputStats.text_units ?? 0) > 0);
-          
-          if (!hasIndex) {
-            setProjectPanelOpen(true);
-            setLoading(false);
-            return;
-          }
-        }
+  const loadGraph = useCallback(async (mode: 'initial' | 'reload' = 'reload') => {
+    if (loadingGraphRef.current) return
+    loadingGraphRef.current = true
+    if (mode === 'initial') setLoading(true)
+    setError(null)
 
-        setStatus('Loading JSON data files...');
-
-        const loader = new GraphDataLoader('/api/data');
-        const graphData = await loader.loadGraphData();
-
-        setStatus('Processing graph structure...');
-        
-        const newSimulation = new ForceSimulation3D(defaultForceConfig);
-        const layout = await newSimulation.generateLayout(graphData);
-        
-        // not retaining simulation in state
-
-        setStatus('Rendering visualization...');
-        
-        setLayout(layout);
-        setGraphData(graphData);
-        setLoading(false);
-
-      } catch (error) {
-        console.error('Error loading graph data:', error);
-        setLoading(false);
-        // Don't set error - just fall back to no data state
-      }
-    };
-
-    loadData();
-  }, []);
-
-  // Hot-reload graph data when the corpus pipeline finishes
-  const reloadGraphData = useCallback(async () => {
     try {
-      setStatus('Reloading graph data...');
-      const loader = new GraphDataLoader('/api/data');
-      const newGraph = await loader.loadGraphData();
-      const sim = new ForceSimulation3D(defaultForceConfig);
-      const newLayout = await sim.generateLayout(newGraph);
-      // not retaining simulation in state
-      setLayout(newLayout);
-      setGraphData(newGraph);
-      setStatus('Graph reloaded');
-    } catch (err) {
-      console.warn('Hot reload failed:', err);
-    }
-  }, []);
+      setStatus(mode === 'initial' ? '正在检查项目数据…' : '正在刷新知识图谱…')
+      if (mode === 'initial') {
+        const corpusResponse = await fetch('/api/corpus/state', { cache: 'no-store' })
+        if (!corpusResponse.ok) throw new Error('无法读取项目状态')
+        const corpus = await corpusResponse.json() as { kgName?: string; outputStats?: Record<string, number> }
+        const projectName = String(corpus.kgName ?? '').trim()
+        const requiresName = projectName.length === 0
+        setCurrentProjectName(projectName)
+        setProjectNameRequired(requiresName)
+        if (requiresName) setProjectPanelOpen(true)
 
-  // Track the server-owned index job so the UI reflects a build even when
-  // the Builder sheet is closed: the Projects button shows activity, and the
-  // constellation populates progressively as each artifact lands (the job
-  // bumps dataVersion whenever fresh JSON is written to output/).
+        const stats = corpus.outputStats ?? {}
+        const hasIndex = (stats.entities ?? 0) + (stats.relationships ?? 0) + (stats.communities ?? 0) + (stats.text_units ?? 0) > 0
+        if (!hasIndex) {
+          setGraphData(null)
+          setLayout(null)
+          setStatus('请上传文献并构建知识图谱')
+          setProjectPanelOpen(true)
+          return
+        }
+      }
+
+      setStatus('正在加载图谱数据…')
+      const nextGraph = await new GraphDataLoader('/api/data').loadGraphData()
+      setStatus('正在计算三维布局…')
+      const startedAt = performance.now()
+      const nextLayout = await new ForceSimulation3D(defaultForceConfig).generateLayout(nextGraph)
+      const elapsed = Math.round(performance.now() - startedAt)
+      setGraphData(nextGraph)
+      setLayout(nextLayout)
+      setSelectedNode(current => current ? nextLayout.nodes.find(node => node.id === current.id) ?? null : null)
+      setStatus(`图谱已加载 · 布局 ${elapsed.toLocaleString()}ms`)
+    } catch (cause) {
+      console.error('Failed to load graph data', cause)
+      setError('加载知识图谱失败。请确认项目已完成索引，然后重试。')
+    } finally {
+      setLoading(false)
+      loadingGraphRef.current = false
+    }
+  }, [])
+
   useEffect(() => {
-    let cancelled = false;
-    let lastDataVersion: number | null = null;
+    loadGraph('initial')
+  }, [loadGraph])
+
+  useEffect(() => {
+    let cancelled = false
+    let lastDataVersion: number | null = null
     const poll = async () => {
       try {
-        const res = await fetch('/api/corpus/index/status', { cache: 'no-store' });
-        if (!res.ok || cancelled) return;
-        const job = await res.json() as { running?: boolean; dataVersion?: number };
-        setBuildRunning(job.running === true);
-        const version = job.dataVersion ?? 0;
-        if (lastDataVersion !== null && version !== lastDataVersion) {
-          reloadGraphData();
-        }
-        lastDataVersion = version;
-      } catch {}
-    };
-    poll();
-    const timer = window.setInterval(poll, 2500);
-    return () => { cancelled = true; window.clearInterval(timer); };
-  }, [reloadGraphData]);
+        const response = await fetch('/api/corpus/index/status', { cache: 'no-store' })
+        if (!response.ok || cancelled) return
+        const job = await response.json() as { running?: boolean; dataVersion?: number }
+        setBuildRunning(job.running === true)
+        const version = job.dataVersion ?? 0
+        if (lastDataVersion !== null && version !== lastDataVersion) loadGraph()
+        lastDataVersion = version
+      } catch {
+        if (!cancelled) setBuildRunning(false)
+      }
+    }
+    poll()
+    const timer = window.setInterval(poll, 2500)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [loadGraph])
 
   useEffect(() => {
-    const handler = () => reloadGraphData();
-    window.addEventListener('graph-data-updated', handler);
-    const clearHandler = () => {
-      setGraphData(null);
-      setLayout(null);
-      setStatus('No graph loaded');
-      setSelectedNode(null);
-    };
-    window.addEventListener('graph-data-cleared', clearHandler);
+    const refresh = () => loadGraph()
+    const clear = () => {
+      setGraphData(null)
+      setLayout(null)
+      setSelectedNode(null)
+      setStatus('请上传文献并构建知识图谱')
+    }
+    window.addEventListener('graph-data-updated', refresh)
+    window.addEventListener('graph-data-cleared', clear)
     return () => {
-      window.removeEventListener('graph-data-updated', handler);
-      window.removeEventListener('graph-data-cleared', clearHandler);
-    };
-  }, [reloadGraphData]);
+      window.removeEventListener('graph-data-updated', refresh)
+      window.removeEventListener('graph-data-cleared', clear)
+    }
+  }, [loadGraph])
 
-  // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      // ESC to unselect node
       if (event.key === 'Escape') {
-        setSelectedNode(null);
+        setFiltersOpen(false)
+        setSelectedNode(null)
       }
-      
-      // Cmd+K (Mac) or Ctrl+K (Windows/Linux) to focus search
-      if ((event.metaKey || event.ctrlKey) && event.key === 'k') {
-        event.preventDefault();
-        searchInputRef.current?.focus();
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setActiveView('graph')
+        window.requestAnimationFrame(() => searchInputRef.current?.focus())
       }
-      
-      // Cmd+Backspace (Mac) or Ctrl+Backspace (Windows/Linux) to clear search
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Backspace') {
-        event.preventDefault();
-        setSearchTerm('');
-        searchInputRef.current?.focus();
-      }
-    };
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [])
 
-    document.addEventListener('keydown', handleKeyDown);
-    
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, []);
-
-  // settings-related handlers removed
-
-  const handleSearchChange = (term: string) => {
-    setSearchTerm(term);
-  };
+  const entityTypes = useMemo(() => [...new Set(graphData?.entities.map(entity => entity.type).filter(Boolean) ?? [])].sort(), [graphData])
+  const communityLevels = useMemo(() => [...new Set(graphData?.communities.map(community => community.level) ?? [])].sort((a, b) => a - b), [graphData])
+  const maxRelationshipWeight = useMemo(() => Math.max(1, ...(graphData?.relationships.map(relationship => relationship.weight) ?? [1])), [graphData])
 
   const filteredLayout = useMemo(() => {
-    if (!layout || !graphData) return null;
-
-    let filteredNodes = layout.nodes;
-    let filteredLinks = layout.links;
-
-    // Apply entity type filter
-    if (selectedEntityTypes.size > 0) {
-      filteredNodes = filteredNodes.filter(node => selectedEntityTypes.has(node.type));
-    }
-
-    // Apply level filter
-    if (selectedLevel !== null) {
-      filteredNodes = filteredNodes.filter(node => node.communityLevel === selectedLevel);
-    }
-
-    // DON'T filter by search term here - pass to GraphVisualizer instead
-    // This prevents nodes from being removed and repositioned
-
-    // Filter links based on visible nodes and weight
-    const visibleNodeIds = new Set(filteredNodes.map(node => node.id));
-    filteredLinks = filteredLinks.filter(link => 
-      link.weight >= minRelationshipWeight &&
-      visibleNodeIds.has(link.source.id) && 
-      visibleNodeIds.has(link.target.id)
-    );
-
-    return {
-      nodes: filteredNodes,
-      links: filteredLinks,
-      communities: layout.communities,
-    };
-  }, [layout, graphData, selectedEntityTypes, selectedLevel, minRelationshipWeight]);
+    if (!layout) return null
+    const nodes = layout.nodes.filter(node =>
+      (selectedEntityTypes.size === 0 || selectedEntityTypes.has(node.type)) &&
+      (selectedLevel === null || node.communityLevel === selectedLevel)
+    )
+    const nodeIds = new Set(nodes.map(node => node.id))
+    const links = layout.links.filter(link =>
+      link.weight >= minRelationshipWeight && nodeIds.has(link.source.id) && nodeIds.has(link.target.id)
+    )
+    return { nodes, links, communities: layout.communities }
+  }, [layout, minRelationshipWeight, selectedEntityTypes, selectedLevel])
 
   const connectedLinks = useMemo(() => {
-    if (!selectedNode || !filteredLayout) return [];
-    return filteredLayout.links.filter(link => 
-      link.source.id === selectedNode.id || link.target.id === selectedNode.id
-    );
-  }, [selectedNode, filteredLayout]);
+    if (!selectedNode || !filteredLayout) return []
+    return filteredLayout.links.filter(link => link.source.id === selectedNode.id || link.target.id === selectedNode.id)
+  }, [filteredLayout, selectedNode])
 
-  // When chat updates highlights, reflect them (unused handler removed)
-
-  // Helper function to get complete subtree under the L0 parent of selected community
-  const getCompleteHierarchyTree = useCallback((selectedCommunity: Community, allCommunities: Community[]) => {
-    if (!selectedCommunity || !allCommunities || allCommunities.length === 0) {
-      return [];
-    }
-
-      // debug log removed in production sweep
-
-    // Create efficient lookup maps
-    const communityByHumanIdMap = new Map<string, Community>(allCommunities.map(c => [String(c.human_readable_id), c]));
-    
-    // Build parent-child map
-    const childrenByParentId = new Map<string, Community[]>();
-    allCommunities.forEach(community => {
-      if (community.parent !== undefined) {
-        const parentId = String(community.parent);
-        if (!childrenByParentId.has(parentId)) {
-          childrenByParentId.set(parentId, []);
-        }
-        childrenByParentId.get(parentId)!.push(community);
-      }
-    });
-
-    try {
-      // Step 1: Find the L0 root by walking up the tree
-      let currentCommunity: Community | undefined = selectedCommunity;
-      const pathToRoot = [currentCommunity];
-      
-      while (currentCommunity && currentCommunity.parent !== undefined) {
-        const parentId = String(currentCommunity.parent);
-        const parentCommunity = communityByHumanIdMap.get(parentId);
-        
-        if (!parentCommunity) break;
-        
-        pathToRoot.unshift(parentCommunity);
-        currentCommunity = parentCommunity;
-        
-        // Safety check to prevent infinite loops
-        if (pathToRoot.length > 10) break;
-      }
-      
-      // The first item should be the L0 root
-      const rootCommunity = pathToRoot[0];
-      // debug log removed in production sweep
-      
-      // Step 2: Collect entire subtree under this L0 root
-      const subtreeCommunities = new Set<string>();
-      const queue: Community[] = [rootCommunity];
-      const visited = new Set<string>();
-      
-      while (queue.length > 0) {
-        const community = queue.shift()!;
-        
-        if (!community || visited.has(community.id)) continue;
-        
-        visited.add(community.id);
-        subtreeCommunities.add(community.id);
-        
-        // Add all children to queue
-        const children = childrenByParentId.get(String(community.human_readable_id)) || [];
-        
-        // Also check the children array if available
-        community.children.forEach((childHumanId: string) => {
-          const childCommunity = communityByHumanIdMap.get(String(childHumanId));
-          if (childCommunity && !children.some(c => c.id === childCommunity.id)) {
-            children.push(childCommunity);
-          }
-        });
-        
-        children.forEach(childCommunity => {
-          if (!visited.has(childCommunity.id)) {
-            queue.push(childCommunity);
-          }
-        });
-      }
-
-      const result = allCommunities
-        .filter(c => subtreeCommunities.has(c.id))
-        .sort((a, b) => (a.level || 0) - (b.level || 0));
-      
-      // debug log removed in production sweep
-      
-      return result;
-      
-    } catch (error) {
-      console.warn('Error building community subtree:', error);
-      // Fallback to just the selected community
-      return [selectedCommunity];
-    }
-  }, []);
-
-  // Calculate which communities to show based on selected node and inspector mode
   const visibleCommunities = useMemo(() => {
-    if (!layout?.communities) return [];
-    
-    // Inspector mode shows hierarchy tree when node selected
-    if (inspectorMode && selectedNode) {
-      // If node has community, show hierarchy tree
-      if (selectedNode.community) {
-        return getCompleteHierarchyTree(selectedNode.community, layout.communities);
-      }
-      // If node has no community, show no communities
-      return [];
-    }
-    
-    // Default: show all communities
-    return layout.communities;
-  }, [layout?.communities, selectedNode, inspectorMode, getCompleteHierarchyTree]);
+    if (!layout) return []
+    if (!inspectorMode || !selectedNode?.community) return layout.communities
+    return collectCommunityTree(selectedNode.community, layout.communities)
+  }, [inspectorMode, layout, selectedNode])
 
-  // Determine effective community mode for components
-  const effectiveCommunityMode = inspectorMode && selectedNode ? 'auto' : 'all';
+  const selectEntityById = useCallback((entityId: string) => {
+    const node = layout?.nodes.find(item => item.id === entityId)
+    if (!node) return
+    setSelectedNode(node)
+    setSearchTerm('')
+    setActiveView('graph')
+    setChatOpen(false)
+  }, [layout])
 
-  const handleRetry = () => {
-    setError(null);
-    window.location.reload();
-  };
-
-
-  // No key management UI in OpenAI-only mode
+  const selectEntityType = useCallback((entityType: string) => {
+    setSelectedEntityTypes(new Set([entityType]))
+    setActiveView('graph')
+  }, [])
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-background" data-hmi-root>
-      {/* Main Content */}
-      <div className="h-full w-full overflow-hidden">
-        {/* Graph owns the full viewport. Inspector overlays it only when selected. */}
-        <div className="absolute inset-0 z-0">
-          <div className="h-full">
-            <GraphVisualizer
-              layout={filteredLayout}
-              loading={loading}
-              error={error}
-              status={status}
-              onRetry={handleRetry}
-              selectedEntityTypes={selectedEntityTypes}
-              minRelationshipWeight={minRelationshipWeight}
-              showCommunityBoundaries={true}
-              visibleCommunities={visibleCommunities}
-              communityMode={effectiveCommunityMode}
-              selectedLevel={selectedLevel}
-              onNodeSelect={setSelectedNode}
-              selectedNode={selectedNode}
-              ragHighlightedNodeIds={ragHighlightedNodeIds}
-              searchTerm={searchTerm}
-              onNodeHover={setHoveredNode}
-              hoveredNode={hoveredNode}
-              viewportOffset={selectedNode ? 420 : 0}
-            />
+    <main className="relative h-screen w-screen overflow-hidden bg-background" data-hmi-root>
+      <header className="pointer-events-none absolute inset-x-0 top-0 z-40 flex items-start justify-between gap-3 p-3 sm:p-4">
+        <div className="pointer-events-auto flex min-w-0 items-center gap-2 border border-white/12 bg-[#05080b]/82 p-1.5 shadow-xl backdrop-blur-xl">
+          <div className="hidden min-w-0 px-2 sm:block">
+            <div className="font-mono text-[8px] uppercase tracking-[0.2em] text-primary">SciGraph</div>
+            <div className="max-w-40 truncate text-xs font-medium">{currentProjectName || '科研知识工作台'}</div>
           </div>
+          <div className="hidden h-7 w-px bg-white/10 sm:block" />
+          <NavButton active={activeView === 'graph'} icon={Network} label="知识图谱" onClick={() => setActiveView('graph')} />
+          <NavButton active={activeView === 'analytics'} icon={BarChart3} label="数据看板" onClick={() => setActiveView('analytics')} />
         </div>
 
-        {selectedNode && (
-          <div className="graphrag-inspector-enter absolute inset-y-0 left-0 z-30 w-[420px] border-r border-white/15 pointer-events-auto">
-          <Inspector
-            selectedNode={selectedNode}
-            connectedLinks={connectedLinks}
-            visibleCommunities={visibleCommunities}
-            communityMode={effectiveCommunityMode}
-            onClose={() => setSelectedNode(null)}
-            onNodeSelect={setSelectedNode}
-            projectName={currentProjectName}
-          />
-          </div>
-        )}
-      </div>
-
-      {!selectedNode && currentProjectName && (
-        <div className="pointer-events-none absolute left-4 top-4 z-20 border border-white/12 bg-[#05080b]/68 px-3 py-2 backdrop-blur-xl">
-          <div className="font-mono text-[8px] uppercase tracking-[0.12em] text-muted-foreground">Current project</div>
-          <div className="mt-0.5 max-w-64 truncate text-[11px] font-medium">{currentProjectName}</div>
-        </div>
-      )}
-      
-      {/* Floating Search and Settings Controls */}
-      <div className="absolute right-4 top-4 z-20 flex items-center gap-1">
-        <div className="relative">
-          <div className="relative">
-            <Input
-              ref={searchInputRef}
-              placeholder="Search entities..."
-              value={searchTerm}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              className="h-9 w-56 rounded-none border-white/15 bg-[#05080b]/76 pr-16 text-[11px] backdrop-blur-xl placeholder:text-muted-foreground/70 focus-visible:border-primary"
-            />
-            <div className="absolute right-2 top-1/2 transform -translate-y-1/2 flex items-center gap-1">
-              {searchTerm && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setSearchTerm('');
-                    searchInputRef.current?.focus();
-                  }}
-                  className="h-6 w-6 rounded-none p-0 hover:bg-white/[0.07]"
-                  title="Clear search"
-                >
-                  <X className="h-3 w-3" />
-                </Button>
-              )}
-              <kbd className="pointer-events-none inline-flex h-5 items-center gap-1 border-l border-white/10 px-1.5 font-mono text-[9px] uppercase text-muted-foreground select-none">
-                <span>⌘</span>K
-              </kbd>
+        <div className="pointer-events-auto flex min-w-0 items-center gap-1.5">
+          {activeView === 'graph' && (
+            <div className="relative hidden sm:block">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                ref={searchInputRef}
+                value={searchTerm}
+                onChange={event => setSearchTerm(event.target.value)}
+                placeholder="搜索实体…"
+                aria-label="搜索实体"
+                className="h-10 w-52 rounded-none border-white/12 bg-[#05080b]/82 pl-8 pr-8 text-xs backdrop-blur-xl"
+              />
+              {searchTerm && <button type="button" onClick={() => setSearchTerm('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground" aria-label="清空搜索"><X className="h-3.5 w-3.5" /></button>}
             </div>
-          </div>
+          )}
+          {activeView === 'graph' && <ToolbarButton active={filtersOpen} icon={Filter} label="筛选" onClick={() => setFiltersOpen(value => !value)} />}
+          <ToolbarButton active={chatOpen} icon={MessageCircle} label="AI 问答" onClick={() => setChatOpen(true)} />
+          <ToolbarButton active={guideOpen} icon={PlayCircle} label="演示" onClick={() => setGuideOpen(true)} />
+          <ToolbarButton active={buildRunning} icon={buildRunning ? Loader2 : FolderKanban} label="项目" onClick={() => setProjectPanelOpen(true)} spinning={buildRunning} />
         </div>
-        
-        {/* GitHub Link */}
-        <Button
-          variant="outline"
-          size="icon"
-          asChild
-          className="ml-1 h-9 w-9 rounded-none border-white/15 bg-[#05080b]/76 backdrop-blur-xl hover:bg-white/[0.07]"
-        >
-          <a
-            href="https://github.com/lyon-industries/graphrag-workbench"
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label="View source on GitHub"
-            title="GitHub"
-          >
-            <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-            </svg>
-          </a>
-        </Button>
+      </header>
 
-        {/* Isolator Mode Toggle */}
-        <Button
-          variant="outline"
-          size="sm"
-          aria-pressed={inspectorMode}
-          onClick={() => setInspectorMode(active => !active)}
-          className={`h-9 rounded-none border-white/15 bg-[#05080b]/76 px-3 font-mono text-[9px] uppercase tracking-[0.08em] backdrop-blur-xl hover:bg-white/[0.07] ${inspectorMode ? 'border-primary text-primary' : ''}`}
-          title="Show the selected entity's community hierarchy"
-        >
-          <Eye className="h-3.5 w-3.5" />
-          Isolate community
-        </Button>
+      {activeView === 'graph' ? (
+        <div className="absolute inset-0">
+          <GraphVisualizer
+            layout={filteredLayout}
+            loading={loading}
+            error={error}
+            status={status}
+            onRetry={() => loadGraph()}
+            selectedEntityTypes={selectedEntityTypes}
+            minRelationshipWeight={minRelationshipWeight}
+            showCommunityBoundaries={showCommunityBoundaries}
+            visibleCommunities={visibleCommunities}
+            communityMode={inspectorMode && selectedNode ? 'auto' : 'all'}
+            selectedLevel={selectedLevel}
+            onNodeSelect={setSelectedNode}
+            selectedNode={selectedNode}
+            ragHighlightedNodeIds={ragHighlightedNodeIds}
+            searchTerm={searchTerm}
+            onNodeHover={setHoveredNode}
+            hoveredNode={hoveredNode}
+            viewportOffset={selectedNode ? 420 : 0}
+          />
 
-        <Button
-          variant="outline"
-          size="sm"
-          className={`ml-1 h-9 rounded-none border-white/15 bg-[#05080b]/76 px-3 font-mono text-[9px] uppercase tracking-[0.08em] backdrop-blur-xl hover:bg-white/[0.07] ${buildRunning ? 'border-primary/60' : ''}`}
-          onClick={() => setProjectPanelOpen(true)}
-          aria-label={buildRunning ? 'Open projects — build in progress' : 'Open projects'}
-          title={buildRunning ? 'Projects · build in progress' : 'Projects'}
-        >
-          {buildRunning ? <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" /> : <FolderKanban className="h-3.5 w-3.5" />}
-          Projects
-          {buildRunning && <span className="ml-0.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-primary" aria-hidden />}
-        </Button>
+          <div className="absolute bottom-4 left-4 z-20 flex items-center gap-2 border border-white/10 bg-[#05080b]/72 px-3 py-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground backdrop-blur-xl">
+            {loading ? <Loader2 className="h-3 w-3 animate-spin text-primary" /> : <span className={`h-1.5 w-1.5 rounded-full ${error ? 'bg-destructive' : 'bg-emerald-400'}`} />}
+            <span className="max-w-[60vw] truncate">{status}</span>
+          </div>
 
-        {/* Settings removed */}
-      </div>
+          {filtersOpen && (
+            <div className="absolute right-4 top-16 z-30">
+              <GraphFilters
+                entityTypes={entityTypes}
+                selectedEntityTypes={selectedEntityTypes}
+                onEntityTypesChange={setSelectedEntityTypes}
+                minRelationshipWeight={minRelationshipWeight}
+                maxRelationshipWeight={maxRelationshipWeight}
+                onMinRelationshipWeightChange={setMinRelationshipWeight}
+                communityLevels={communityLevels}
+                selectedLevel={selectedLevel}
+                onLevelChange={setSelectedLevel}
+                showCommunityBoundaries={showCommunityBoundaries}
+                onShowCommunityBoundariesChange={setShowCommunityBoundaries}
+                visibleNodes={filteredLayout?.nodes.length ?? 0}
+                totalNodes={layout?.nodes.length ?? 0}
+                visibleLinks={filteredLayout?.links.length ?? 0}
+                totalLinks={layout?.links.length ?? 0}
+              />
+            </div>
+          )}
 
-      <Sheet open={projectPanelOpen || projectNameRequired} onOpenChange={(open) => {
-        if (!open && projectNameRequired) return;
-        setProjectPanelOpen(open);
-      }}>
-        <SheetContent className="w-[min(760px,calc(100vw-32px))] max-w-none gap-0 p-0 sm:max-w-none">
+          {selectedNode && (
+            <div className="graphrag-inspector-enter absolute inset-y-0 left-0 z-30 w-[min(420px,calc(100vw-24px))] border-r border-white/15 bg-[#05080b] pt-16">
+              <Inspector
+                selectedNode={selectedNode}
+                connectedLinks={connectedLinks}
+                visibleCommunities={visibleCommunities}
+                communityMode={inspectorMode ? 'auto' : 'all'}
+                onClose={() => setSelectedNode(null)}
+                onNodeSelect={setSelectedNode}
+                projectName={currentProjectName}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-pressed={inspectorMode}
+                onClick={() => setInspectorMode(value => !value)}
+                className="absolute bottom-4 right-4 rounded-none border-white/15 bg-black/60 text-xs"
+              >
+                <Eye className="h-3.5 w-3.5" />{inspectorMode ? '显示全部社区' : '隔离所在社区'}
+              </Button>
+            </div>
+          )}
+        </div>
+      ) : (
+        <AnalyticsDashboard
+          graphData={graphData}
+          selectedEntity={selectedNode}
+          onSelectEntity={selectEntityById}
+          onSelectEntityType={selectEntityType}
+        />
+      )}
+
+      <Sheet open={chatOpen} onOpenChange={setChatOpen}>
+        <SheetContent className="w-[min(560px,calc(100vw-16px))] max-w-none gap-0 border-l-white/12 p-0 sm:max-w-none [&>button]:hidden">
           <SheetHeader className="sr-only">
-            <SheetTitle>Projects</SheetTitle>
-            <SheetDescription>Create, load, rename, delete, inspect, and index local GraphRAG projects.</SheetDescription>
+            <SheetTitle>科研文献 AI 问答</SheetTitle>
+            <SheetDescription>使用 GraphRAG 检索当前项目并联动知识图谱。</SheetDescription>
           </SheetHeader>
-          <CorpusPanel onProjectNamed={(name) => {
-            setCurrentProjectName(name);
-            setProjectNameRequired(false);
-          }} onProjectDeleted={() => {
-            setCurrentProjectName('');
-            setProjectNameRequired(true);
-            setProjectPanelOpen(true);
-          }} />
+          <ChatPanel
+            entities={graphData?.entities}
+            selectedEntity={selectedNode}
+            onHighlightNodes={ids => setRagHighlightedNodeIds(new Set(ids))}
+            onSelectEntity={selectEntityById}
+            onClose={() => setChatOpen(false)}
+          />
         </SheetContent>
       </Sheet>
-      
-      {/* Settings modal removed */}
 
-    </div>
-  );
+      <Sheet open={projectPanelOpen || projectNameRequired} onOpenChange={open => {
+        if (!open && projectNameRequired) return
+        setProjectPanelOpen(open)
+      }}>
+        <SheetContent className="w-[min(760px,calc(100vw-16px))] max-w-none gap-0 p-0 sm:max-w-none">
+          <SheetHeader className="sr-only">
+            <SheetTitle>项目与文档</SheetTitle>
+            <SheetDescription>创建、导入、构建和管理本地 GraphRAG 项目。</SheetDescription>
+          </SheetHeader>
+          <CorpusPanel
+            onProjectNamed={name => {
+              setCurrentProjectName(name)
+              setProjectNameRequired(false)
+            }}
+            onProjectDeleted={() => {
+              setCurrentProjectName('')
+              setProjectNameRequired(true)
+              setProjectPanelOpen(true)
+            }}
+          />
+        </SheetContent>
+      </Sheet>
+
+      <Sheet open={guideOpen} onOpenChange={setGuideOpen}>
+        <SheetContent className="w-[min(520px,calc(100vw-16px))] max-w-none gap-0 border-l-white/12 p-0 sm:max-w-none">
+          <SheetHeader className="sr-only">
+            <SheetTitle>AI4Science 演示路径</SheetTitle>
+            <SheetDescription>按步骤体验文献导入、问答、图谱定位和数据分析。</SheetDescription>
+          </SheetHeader>
+          <DemoGuide
+            projectName={currentProjectName}
+            entityCount={graphData?.entities.length ?? 0}
+            relationshipCount={graphData?.relationships.length ?? 0}
+            onOpenProjects={() => {
+              setGuideOpen(false)
+              setProjectPanelOpen(true)
+            }}
+            onOpenChat={() => {
+              setGuideOpen(false)
+              setChatOpen(true)
+            }}
+            onOpenGraph={() => {
+              setGuideOpen(false)
+              setActiveView('graph')
+            }}
+            onOpenAnalytics={() => {
+              setGuideOpen(false)
+              setActiveView('analytics')
+            }}
+          />
+        </SheetContent>
+      </Sheet>
+    </main>
+  )
+}
+
+function NavButton({ active, icon: Icon, label, onClick }: { active: boolean; icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={active} className={`flex h-8 items-center gap-2 px-2.5 text-xs transition-colors ${active ? 'bg-white/10 text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
+      <Icon className="h-3.5 w-3.5" /><span className="hidden sm:inline">{label}</span>
+    </button>
+  )
+}
+
+function ToolbarButton({ active, icon: Icon, label, onClick, spinning = false }: { active: boolean; icon: React.ComponentType<{ className?: string }>; label: string; onClick: () => void; spinning?: boolean }) {
+  return (
+    <Button type="button" variant="outline" size="sm" onClick={onClick} aria-pressed={active} className={`h-10 rounded-none border-white/12 bg-[#05080b]/82 px-3 text-xs backdrop-blur-xl ${active ? 'border-primary/50 text-primary' : ''}`}>
+      <Icon className={`h-3.5 w-3.5 ${spinning ? 'animate-spin' : ''}`} /><span className="hidden md:inline">{label}</span>
+    </Button>
+  )
 }

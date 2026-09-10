@@ -85,7 +85,28 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow: hidden;
+    background-image:
+      radial-gradient(circle at 12% 8%, rgb(98 217 209 / 7%), transparent 28%),
+      radial-gradient(circle at 88% 12%, rgb(234 92 34 / 8%), transparent 24%);
   }
+
+  button,
+  input,
+  textarea,
+  select {
+    font: inherit;
+  }
+
+  ::selection {
+    color: var(--foreground);
+    background: rgb(234 92 34 / 35%);
+  }
+}
+
+* {
+  scrollbar-color: rgb(255 255 255 / 18%) transparent;
+  scrollbar-width: thin;
 }
 
 /* Utility: hide scrollbars but keep scrolling enabled */

@@ -1,0 +1,37 @@
+{
+  "taskId": "frontend-secondary-development",
+  "profile": "visualization-change",
+  "lane": "L3",
+  "status": "verified",
+  "affectedPaths": [
+    "app/page.tsx",
+    "components/ChatPanel.tsx",
+    "components/AnalyticsDashboard.tsx",
+    "components/EChart.tsx",
+    "components/GraphFilters.tsx",
+    "components/GraphVisualizer.tsx",
+    "lib/chatStream.ts",
+    "lib/graphAnalytics.ts",
+    "lib/forceSimulation.ts",
+    "workers/graphLayout.worker.ts"
+  ],
+  "rootCause": "The repository had GraphRAG chat and 3D graph primitives, but the chat was not reachable from the page, analytics were absent, selection state was not shared across views, and large graphs created unbounded per-node rendering work.",
+  "changeSummary": "Added the SciGraph workspace, streaming chat controls, ECharts analytics, cross-view entity selection, a demo guide, Web Worker layout preparation, instanced large-graph nodes, bounded labels and adaptive rendering quality.",
+  "verification": {
+    "automated": [
+      "pnpm test",
+      "pnpm typecheck",
+      "focused eslint",
+      "pnpm harness:quality"
+    ],
+    "manual": [
+      "Browser UI inspection could not run because the admin-enforced browser security policy was unavailable."
+    ],
+    "result": "passed"
+  },
+  "remainingRisks": [
+    "Real 1k/5k/10k WebGL FPS and GPU memory must be measured on the final demo device.",
+    "Citation cards depend on citation markers present in the GraphRAG answer until the server emits a dedicated citation event."
+  ],
+  "sensitiveDataIncluded": false
+}
