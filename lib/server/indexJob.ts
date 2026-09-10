@@ -415,14 +415,29 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
   // reject even while real GraphRAG prompts succeed, so validation is
   // skipped; the engine-log watcher below surfaces real provider failures.
   const localGraphRag = path.join(repositoryRoot, '.venv', process.platform === 'win32' ? 'Scripts/graphrag.exe' : 'bin/graphrag')
+  const localPython = path.join(repositoryRoot, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python')
   let command = 'uv'
   let args = ['run', 'graphrag', 'index', '--root', root, '--method', job.method, '--skip-validation']
-  try {
-    await fs.access(localGraphRag)
-    command = localGraphRag
-    args = ['index', '--root', root, '--method', job.method, '--skip-validation']
-  } catch {}
-  log(`RUNNER �� ${command === localGraphRag ? 'project .venv' : 'uv from PATH'}`)
+  let runnerLabel = 'uv from PATH'
+  if (process.platform === 'win32') {
+    // Keep Windows on the same interpreter whose base runtime is localized by
+    // the launch script. This avoids another console-launcher hop and preserves
+    // Unicode paths through Node's spawn call.
+    try {
+      await fs.access(localPython)
+      command = localPython
+      args = ['-m', 'graphrag', 'index', '--root', root, '--method', job.method, '--skip-validation']
+      runnerLabel = 'project .venv Python module'
+    } catch {}
+  } else {
+    try {
+      await fs.access(localGraphRag)
+      command = localGraphRag
+      args = ['index', '--root', root, '--method', job.method, '--skip-validation']
+      runnerLabel = 'project .venv'
+    } catch {}
+  }
+  log(`RUNNER - ${runnerLabel}`)
   // Windows console launchers (including the Python-generated graphrag.exe)
   // are not reliable when spawned as detached children with piped output:
   // the launcher can close while its Python process is still starting. Keep
@@ -558,6 +573,9 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
   child.on('close', (code, signal) => {
     void (async () => {
       log(`RUNNER EXIT - code ${code ?? 'none'}${signal ? `, signal ${signal}` : ''}`)
+      if (process.platform === 'win32' && code === 103) {
+        log('PYTHON RUNTIME ERROR - the project virtual environment cannot locate its base Python. Run "pnpm python:localize" from a regular PowerShell terminal, restart the app, then retry the build. If localization reports a missing environment, run "uv sync --frozen" first.')
+      }
       clearInterval(engineWatcher)
       await pollEngineLog().catch(() => {})
       await conversionChain.catch(() => {})
@@ -567,7 +585,12 @@ async function runJob(job: IndexJob, env: NodeJS.ProcessEnv, completionModel: st
         await restoreStagedRemovals()
         await writeRegistry(reg => { for (const r of reg) if (r.status === 'scanning') r.status = 'pending'; return reg })
         await publishJobWorkspace(job, repositoryRoot, false).catch(() => {})
-        finish(job.stopRequested ? 'stopped' : 'failed', false, job.fatalError ? 'PROVIDER_FATAL' : pipelineFailed ? 'PIPELINE_FAILED' : code)
+        const failureCode = job.fatalError
+          ? 'PROVIDER_FATAL'
+          : process.platform === 'win32' && code === 103
+            ? 'PYTHON_RUNTIME_UNAVAILABLE'
+            : pipelineFailed ? 'PIPELINE_FAILED' : code
+        finish(job.stopRequested ? 'stopped' : 'failed', false, failureCode)
         return
       }
       try {

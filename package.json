@@ -3,9 +3,12 @@
   "version": "2.0.0",
   "private": true,
   "scripts": {
+    "python:localize": "node scripts/localize-python-runtime.mjs",
+    "predev": "pnpm python:localize",
     "dev": "next dev --turbopack --hostname 127.0.0.1",
     "launch": "if [ ! -d node_modules ]; then pnpm install; fi && if [ ! -d .next ]; then pnpm build; fi && pnpm start",
     "build": "next build --turbopack",
+    "prestart": "pnpm python:localize",
     "start": "next start --hostname 127.0.0.1",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

@@ -62,6 +62,11 @@ uv sync --frozen
 pnpm dev
 ```
 
+On Windows, `pnpm dev` and `pnpm start` automatically copy the uv-managed
+base Python runtime into the ignored `.venv/.base-python` directory. This keeps
+GraphRAG available when the user profile contains non-ASCII characters or the
+application process cannot traverse `AppData`.
+
 Open [http://127.0.0.1:3000](http://127.0.0.1:3000). Development and production commands bind to the local interface.
 
 ## Configure builds in the interface
